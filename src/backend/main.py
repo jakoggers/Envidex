@@ -1,52 +1,54 @@
-import os
-from typing import Optional
+"""
+Envidex prediction service — single FastAPI entrypoint.
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile, File, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
-from pymongo import MongoClient
-from datetime import datetime
+Start without Gemini:
+  cd src/backend && uvicorn main:app --reload --host 127.0.0.1 --port 8000
+
+/predict is the product inference path. Optional /api/animal-info requires GEMINI_API_KEY.
+Prediction.py under AnimalAiImageRec is retired as a second server.
+"""
+
+from __future__ import annotations
+
+import io
 import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
 import numpy as np
 import tensorflow as tf
-from PIL import Image
-import io
-from pathlib import Path
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise RuntimeError("GEMINI_API_KEY is not set.")
-
-mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-client = MongoClient(mongo_uri)
-db = client.envidex  # Assuming 'envidex' is your database name
-logs_collection = db.animal_logs  # Collection for logging animal detections
-
-client = genai.Client(api_key=api_key)
-
-# Load AI model
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-MODEL_PATH = PROJECT_ROOT / "animal_species_model.keras"
-CLASS_NAMES_PATH = PROJECT_ROOT / "class_names.json"
-PREDICTIONS_DIR = Path(__file__).resolve().parent / "Predictions"
+MODEL_PATH = Path(os.getenv("MODEL_PATH", str(PROJECT_ROOT / "animal_species_model.keras")))
+CLASS_NAMES_PATH = Path(os.getenv("CLASS_NAMES_PATH", str(PROJECT_ROOT / "class_names.json")))
+MODEL_VERSION = os.getenv("MODEL_VERSION", MODEL_PATH.name)
 IMG_SIZE = (224, 224)
-
-PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+}
 
 model = None
-class_names = []
+class_names: list[str] = []
 
 if MODEL_PATH.exists() and CLASS_NAMES_PATH.exists():
     model = tf.keras.models.load_model(str(MODEL_PATH))
-    with open(CLASS_NAMES_PATH, "r") as f:
+    with open(CLASS_NAMES_PATH, "r", encoding="utf-8") as f:
         class_names = json.load(f)
 else:
-    print("WARNING: Model files not found.")
+    print(f"WARNING: Model files not found at {MODEL_PATH} / {CLASS_NAMES_PATH}")
 
 SCIENTIFIC_NAMES = {
     "ochotona_princeps": "Ochotona princeps",
@@ -54,27 +56,46 @@ SCIENTIFIC_NAMES = {
     "panthera_tigris": "Panthera tigris",
 }
 
-def predict_pil_image(img: Image.Image):
-    img = img.convert("RGB").resize(IMG_SIZE)
-    arr = np.array(img, dtype=np.float32)
+
+def label_to_common_name(label: str) -> str:
+    return label.replace("_", " ").title()
+
+
+def label_to_scientific_name(label: str) -> str:
+    if label in SCIENTIFIC_NAMES:
+        return SCIENTIFIC_NAMES[label]
+    parts = label.split("_")
+    if len(parts) >= 2:
+        return f"{parts[0].capitalize()} {' '.join(parts[1:])}"
+    return label.replace("_", " ").title()
+
+
+def predict_pil_image(img: Image.Image) -> dict[str, Any]:
+    if model is None or not class_names:
+        raise RuntimeError("Model not loaded")
+
+    rgb = img.convert("RGB").resize(IMG_SIZE)
+    arr = np.array(rgb, dtype=np.float32)
     arr = np.expand_dims(arr, axis=0)
 
     preds = model.predict(arr, verbose=0)
     pred_index = int(np.argmax(preds[0]))
-    confidence = float(preds[0][pred_index])
-
+    score = float(preds[0][pred_index])
     label = class_names[pred_index]
-    scientific_name = SCIENTIFIC_NAMES.get(label, label.replace("_", " ").title())
 
-    result = {
-        "scientific_name": scientific_name,
-        "confidence": round(confidence * 100, 2),
+    return {
+        "label": label,
+        "common_name": label_to_common_name(label),
+        "scientific_name": label_to_scientific_name(label),
+        # Raw model softmax score in [0, 1] — not a calibrated percentage.
+        "score": round(score, 6),
+        "model_version": MODEL_VERSION,
+        "source": "local-keras",
     }
-    return result
 
-app = FastAPI(title="Animal Info API")
 
-# Adjust this in production to your real frontend origin(s)
+app = FastAPI(title="Envidex Prediction API")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -84,22 +105,43 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "model_loaded": model is not None,
+        "model_version": MODEL_VERSION if model is not None else None,
+        "class_count": len(class_names),
+    }
+
+
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...)) -> dict[str, Any]:
     if model is None:
-        return {"error": "Model not loaded."}
-    contents = await file.read()
-    img = Image.open(io.BytesIO(contents))
+        raise HTTPException(status_code=503, detail="Model not loaded")
 
-    result = predict_pil_image(img)
+    content_type = (file.content_type or "").lower()
+    if content_type and content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported image type")
 
-    filename = "prediction.json"
-    output_path = PREDICTIONS_DIR / filename
+    contents = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large")
 
-    with open(output_path, "w") as f:
-        json.dump(result, f, indent=4)
+    try:
+        img = Image.open(io.BytesIO(contents))
+        img.load()
+    except UnidentifiedImageError as exc:
+        raise HTTPException(status_code=400, detail="Invalid image") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail="Invalid image") from exc
 
-    return result
+    try:
+        return predict_pil_image(img)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Prediction failed") from exc
 
 
 class AnimalRequest(BaseModel):
@@ -118,8 +160,6 @@ class AnimalInfo(BaseModel):
     donation_link: Optional[str] = None
 
 
-# Optional trusted link map.
-# This is safer than letting the model invent donation URLs.
 DONATION_LINKS = {
     "snow leopard": "https://snowleopard.org/",
     "african elephant": "https://www.savetheelephants.org/",
@@ -136,8 +176,36 @@ def inject_trusted_donation_link(info: AnimalInfo) -> AnimalInfo:
     return info
 
 
+def _gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    from google import genai
+
+    return genai.Client(api_key=api_key)
+
+
+def _optional_logs_collection():
+    mongo_uri = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI_REAL")
+    if not mongo_uri:
+        return None
+    from pymongo import MongoClient
+
+    client = MongoClient(mongo_uri)
+    return client.envidex.animal_logs
+
+
 @app.post("/api/animal-info", response_model=AnimalInfo)
-def get_animal_info(payload: AnimalRequest):
+def get_animal_info(payload: AnimalRequest) -> AnimalInfo:
+    gemini = _gemini_client()
+    if gemini is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Animal info unavailable: GEMINI_API_KEY is not configured",
+        )
+
+    from google.genai import types
+
     detected = payload.detected_name.strip()
     if not detected:
         raise HTTPException(status_code=400, detail="detected_name is required")
@@ -158,10 +226,11 @@ Instructions:
 - Return a concise conservation/endangerment status.
 - donation_link must be null unless you are highly confident in an official or well-known conservation donation page.
 - If the detector output is uncertain, be conservative and reflect uncertainty briefly in the description.
+- Never invent population counts or citations you do not know.
 """
 
     try:
-        response = client.models.generate_content(
+        response = gemini.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -170,31 +239,25 @@ Instructions:
                 temperature=0.2,
             ),
         )
-
-        # With structured output, the SDK can parse into the schema.
         parsed = response.parsed
-
         if parsed is None:
             raise ValueError("Gemini returned no parsed JSON")
 
-        result = parsed
-        result = inject_trusted_donation_link(result)
-        
-        # Log the animal detection to MongoDB
-        log_entry = {
-            "detected_name": payload.detected_name,
-            "scientific_name": result.scientific_name,
-            "common_name": result.common_name,
-            "confidence": payload.confidence,
-            "timestamp": datetime.utcnow(),
-            "user_id": None,  # Add user ID if available from auth
-        }
-        logs_collection.insert_one(log_entry)
-        
+        result = inject_trusted_donation_link(parsed)
+        logs = _optional_logs_collection()
+        if logs is not None:
+            logs.insert_one(
+                {
+                    "detected_name": payload.detected_name,
+                    "scientific_name": result.scientific_name,
+                    "common_name": result.common_name,
+                    "confidence": payload.confidence,
+                    "timestamp": datetime.utcnow(),
+                    "user_id": None,
+                }
+            )
         return result
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini request failed: {str(e)}")
-    
-#http://127.0.0.1:8000/docs
-#uvicorn main:app --reload
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Gemini request failed") from exc

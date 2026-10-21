@@ -1,142 +1,165 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { BookOpen, Search, Lock, TreePine, Waves, Sun, Leaf, Mountain, Globe, PawPrint } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { BookOpen, Search, Trash2, Loader2 } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
-import { useEnvidexStore } from "@/lib/store";
-import { mockSpeciesDatabase, findSpeciesById } from "@/lib/mock-species";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-} from "@/components/ui/dialog";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import type { ConservationStatus } from "@/lib/types";
 
-type SpeciesRecord = (typeof mockSpeciesDatabase)[number];
-
-function getHabitatIcon(habitat: string) {
-  const h = habitat.toLowerCase();
-  if (h.includes("forest") || h.includes("rainforest")) return TreePine;
-  if (h.includes("ocean") || h.includes("marine") || h.includes("coastal")) return Waves;
-  if (h.includes("desert")) return Sun;
-  if (h.includes("grass") || h.includes("meadow") || h.includes("field")) return Leaf;
-  if (h.includes("mountain") || h.includes("alpine") || h.includes("rocky")) return Mountain;
-  return Globe;
-}
-
-function SpeciesVisual({
-  species,
-  sizeClass,
-  emojiClass,
-}: {
-  species: SpeciesRecord;
-  sizeClass: string;
-  emojiClass: string;
-}) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const imagePath = `/animal_images/${encodeURIComponent(species.commonName)}.jpg`;
-  const isAnimal = species.kingdom === "Animalia";
-
-  return (
-    <div
-      className={`rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden shrink-0 ${sizeClass}`}
-    >
-      {isAnimal && !imageFailed ? (
-        <img
-          src={imagePath}
-          alt={species.commonName}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          onError={() => setImageFailed(true)}
-        />
-      ) : (
-        <PawPrint className={emojiClass} />
-      )}
-    </div>
-  );
-}
+type ObservationItem = {
+  id: string;
+  speciesId: string;
+  imageUrl: string;
+  createdAt: string;
+  species: {
+    id: string;
+    commonName: string;
+    scientificName: string;
+    conservationStatus: ConservationStatus;
+    habitat: string[];
+    description: string;
+    verification?: { source: string; verified: boolean };
+  } | null;
+};
 
 export default function CollectionPage() {
-  const { collection } = useEnvidexStore();
-  const [exampleSpecies, setExampleSpecies] = useState(mockSpeciesDatabase[0]);
-  const [isExampleOpen, setIsExampleOpen] = useState(false);
+  const { status } = useSession();
+  const router = useRouter();
+  const [items, setItems] = useState<ObservationItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const sharedCardVariants = {
-    hidden: { opacity: 0, y: 14, scale: 0.98 },
-    show: (index: number) => ({
-      opacity: 1,
-      y: 0,
-      scale: 1,
-      transition: {
-        delay: index * 0.05,
-        duration: 0.38,
-        ease: [0.22, 1, 0.36, 1] as const,
-      },
-    }),
+  const load = useCallback(async (q?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      const res = await fetch(`/api/observations?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data.error === "string" ? data.error : "Could not load field guide");
+      }
+      setItems(data.observations ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load field guide");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (status === "unauthenticated") router.replace("/login");
+  }, [status, router]);
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      void load();
+    }
+  }, [status, load]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => {
+      const name = item.species?.commonName?.toLowerCase() ?? "";
+      const sci = item.species?.scientificName?.toLowerCase() ?? "";
+      return name.includes(q) || sci.includes(q);
+    });
+  }, [items, query]);
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/observations/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data.error === "string" ? data.error : "Delete failed");
+      }
+      setItems((prev) => prev.filter((o) => o.id !== id));
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
-  const collectedSpecies = useMemo(
-    () =>
-      collection
-        .map((entry) => ({
-          entry,
-          species: findSpeciesById(entry.speciesId),
-        }))
-        .filter((item) => item.species !== undefined),
-    [collection]
-  );
-
-  const allSpecies = mockSpeciesDatabase;
-  const collectedIds = new Set(collection.map((e) => e.speciesId));
-  const completionPct = Math.round((collectedIds.size / allSpecies.length) * 100);
-
-  const openExampleProfile = (species: (typeof mockSpeciesDatabase)[number]) => {
-    setExampleSpecies(species);
-    setIsExampleOpen(true);
-  };
+  if (status === "loading" || status === "unauthenticated") {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
-      {/* Header */}
       <div className="px-4 pt-10 pb-4">
         <div className="flex items-center gap-2 mb-1">
           <BookOpen className="h-5 w-5 text-primary" />
           <h1 className="text-2xl font-bold">Field Guide</h1>
         </div>
-        <p className="text-sm text-muted-foreground">Your personal species collection</p>
+        <p className="text-sm text-muted-foreground">
+          Private observations saved on the server — not shared device storage.
+        </p>
       </div>
 
-      {/* Progress */}
+      <div className="px-4 pb-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name"
+            className="w-full rounded-2xl border border-border/50 bg-card/60 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary/50"
+          />
+        </div>
+      </div>
+
       <div className="px-4 pb-4">
-        <Card className="p-4 border-border/50 bg-card/60">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Discovery Progress</span>
-            <span className="text-xs font-bold text-primary">{collectedIds.size}/{allSpecies.length}</span>
-          </div>
-          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-primary"
-              initial={{ width: 0 }}
-              animate={{ width: `${completionPct}%` }}
-              transition={{ duration: 1.5 , ease: "easeOut" }}
-            />
-          </div>
-          <p className="text-[1px] text-muted-foreground mt-1.5">{completionPct}% complete</p>
-        </Card>
+        <div className="rounded-2xl border border-border/40 bg-card/40 px-4 py-3 flex items-center justify-between">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Saved observations
+          </span>
+          <span className="text-xs font-bold text-primary">{filtered.length}</span>
+        </div>
       </div>
 
-      {/* Empty state */}
-      {collectedSpecies.length === 0 && (
+      {loading && (
+        <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading observations…
+        </div>
+      )}
+
+      {error && (
+        <p className="px-4 text-sm text-red-400" role="alert">
+          {error}
+        </p>
+      )}
+
+      {deleteError && (
+        <p className="px-4 pb-2 text-sm text-red-400" role="alert">
+          Delete failed: {deleteError}
+        </p>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
         <div className="px-4 flex-1 flex flex-col items-center justify-center gap-4 py-16">
           <div className="h-20 w-20 rounded-3xl bg-muted/30 flex items-center justify-center">
             <Search className="h-10 w-10 text-muted-foreground/40" />
           </div>
           <div className="text-center">
-            <p className="font-semibold text-sm mb-1">Nothing discovered yet</p>
-            <p className="text-xs text-muted-foreground">Identify mammals around you to fill your Field Guide</p>
+            <p className="font-semibold text-sm mb-1">Nothing saved yet</p>
+            <p className="text-xs text-muted-foreground">
+              Identify a mammal and tap Save private to add it here.
+            </p>
           </div>
           <Link
             href="/live-feed"
@@ -147,174 +170,65 @@ export default function CollectionPage() {
         </div>
       )}
 
-
-      {/* Collected species */}
-      {collectedSpecies.length > 0 && (
-        <div className="px-4 pb-4">
-          <h2 className="text-sm font-semibold mb-3">Discovered</h2>
-          <div className="space-y-3">
-            {collectedSpecies.map(({ species, entry }, i) => (
-              <motion.div
-                key={entry.speciesId}
-                custom={i}
-                variants={sharedCardVariants}
-                initial="hidden"
-                animate="show"
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.985 }}
-              >
-                <Link href={`/species/${species!.id}`}>
-                  <Card className="overflow-hidden border-border/50 bg-card/60">
-                    {/* Image */}
-                    <SpeciesVisual species={species!} sizeClass="h-48 w-full rounded-none" emojiClass="h-16 w-16 text-muted-foreground/40" />
-
-                    <div className="p-3 space-y-2.5">
-                      {/* Name */}
-                      <div className="text-center">
-                        <p className="font-bold text-base">{species!.commonName}</p>
-                        <p className="text-[11px] text-muted-foreground italic">{species!.scientificName}</p>
-                      </div>
-
-                      {/* Status + Population */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <Card className="px-2 py-2.5 bg-card/50 border-border/50 flex flex-col items-center text-center gap-1">
-                          <p className="text-[10px] text-muted-foreground">Conservation Status</p>
-                          <StatusBadge status={species!.conservationStatus} size="sm" />
-                        </Card>
-                        <Card className="px-2 py-2.5 bg-card/50 border-border/50 flex flex-col items-center text-center gap-1">
-                          <p className="text-[10px] text-muted-foreground">Population</p>
-                          <p className="text-xs font-semibold leading-snug">{species!.population}</p>
-                        </Card>
-                      </div>
-
-                      {/* Habitat */}
-                      {species!.habitat.length > 0 && (
-                        <Card className="p-2 bg-card/50 border-border/50">
-                          <p className="text-[10px] text-muted-foreground text-center mb-2">Habitat</p>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {species!.habitat.slice(0, 4).map((h) => {
-                              const Icon = getHabitatIcon(h);
-                              return (
-                                <div
-                                  key={h}
-                                  className="rounded-lg border border-border/60 bg-background/40 p-2 flex flex-col items-center justify-center text-center min-h-16"
-                                >
-                                  <Icon className="h-5 w-5 text-primary" />
-                                  <span className="text-[10px] font-medium mt-1 leading-snug">{h}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </Card>
-                      )}
-
-                      {/* Description */}
-                      <Card className="p-2.5 bg-card/50 border-border/50">
-                        <p className="text-[10px] text-muted-foreground text-center mb-1">About</p>
-                        <p className="text-xs leading-relaxed text-center line-clamp-3">{species!.description}</p>
-                      </Card>
-
-                      {/* Discovered date */}
-                      <p className="text-[10px] text-muted-foreground text-center">
-                        Discovered {new Date(entry.discoveredAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                      </p>
-                    </div>
-                  </Card>
-                </Link>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Locked / undiscovered */}
-      <div className="px-4 pb-6">
-        <h2 className="text-sm font-semibold mb-3 text-muted-foreground">Undiscovered</h2>
-        <div className="grid grid-cols-3 gap-2">
-          {allSpecies
-            .filter((s) => !collectedIds.has(s.id))
-            .map((species, i) => (
-              <motion.button
-                key={species.id}
-                type="button"
-                onClick={() => openExampleProfile(species)}
-                className="aspect-square"
-                aria-label="Open undiscovered example"
-                custom={i}
-                variants={sharedCardVariants}
-                initial="hidden"
-                animate="show"
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.985 }}
-              >
-                <Card className="h-full flex flex-col items-center justify-center gap-1.5 border-border/30 bg-card/30 p-2 transition-colors hover:bg-card/45 active:scale-[0.98]">
-                  <div className="h-10 w-10 rounded-xl bg-muted/50 flex items-center justify-center">
-                    <Lock className="h-4 w-4 text-muted-foreground/50" />
-                  </div>
-                  <span className="text-[9px] text-muted-foreground/50 text-center leading-tight">Tap to preview</span>
-                </Card>
-              </motion.button>
-            ))}
-        </div>
-      </div>
-
-      <Dialog open={isExampleOpen} onOpenChange={setIsExampleOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogDescription>
-              <i>This is a Preview</i>
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Card className="p-1 bg-card/40 border-border/50">
-                <SpeciesVisual species={exampleSpecies} sizeClass="h-56 w-full" emojiClass="h-16 w-16 text-muted-foreground/40" />
-              </Card>
-              <div className="text-center">
-                <p className="font-semibold text-xl">{exampleSpecies.commonName}</p>
-                <p className="text-xs text-muted-foreground italic">{exampleSpecies.scientificName}</p>
+      <div className="px-4 pb-8 space-y-3">
+        {filtered.map((item, i) => (
+          <motion.div
+            key={item.id}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.04 }}
+            className="rounded-2xl border border-border/50 bg-card/60 overflow-hidden"
+          >
+            <Link href={`/collection/${item.id}`} className="block">
+              <div className="aspect-[16/10] bg-muted/30">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={item.imageUrl}
+                  alt={item.species?.commonName ?? "Observation"}
+                  className="h-full w-full object-cover"
+                />
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <Card className="w-fit mx-auto px-2 py-3 bg-card/50 border-border/50 flex flex-col items-center text-center">
-                <p className="text-foreground">Conservation Status</p>
-                <div className="mt-1 flex justify-center">
-                  <StatusBadge status={exampleSpecies.conservationStatus} size="sm" />
+              <div className="p-3 space-y-1">
+                <p className="font-bold text-base">{item.species?.commonName ?? "Unknown"}</p>
+                <p className="text-[11px] text-muted-foreground italic">
+                  {item.species?.scientificName}
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  {item.species?.conservationStatus && (
+                    <StatusBadge status={item.species.conservationStatus} size="sm" />
+                  )}
+                  {item.species?.verification && !item.species.verification.verified && (
+                    <span className="text-[10px] text-muted-foreground">unverified catalog</span>
+                  )}
                 </div>
-              </Card>
-              <Card className="w-fit mx-auto px-2 py-3 bg-card/50 border-border/50 flex flex-col items-center text-center">
-                <p className="font-medium text-foreground">Population</p>
-                <p className="font-medium mt-1">{exampleSpecies.population}</p>
-              </Card>
-            </div>
-
-            <Card className="p-1 bg-card/50 border-border/50">
-              <p className="text-sm font-semibold text-foreground text-center mb-1">Habitat</p>
-              <div className="grid grid-cols-2 gap-2">
-                {exampleSpecies.habitat.map((habitat) => {
-                  const Icon = getHabitatIcon(habitat);
-                  return (
-                    <div
-                      key={habitat}
-                      className="rounded-lg border border-border/60 bg-background/40 min-h-24 p-3 flex flex-col items-center justify-center text-center"
-                    >
-                      <Icon className="h-6 w-6 text-primary" />
-                      <span className="text-sm font-semibold mt-1.5 leading-snug">{habitat}</span>
-                    </div>
-                  );
-                })}
+                <p className="text-[10px] text-muted-foreground">
+                  Saved{" "}
+                  {new Date(item.createdAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </p>
               </div>
-            </Card>
-
-            <Card className="p-3 bg-card/50 border-border/50 text-center">
-              <p className="text-sm font-semibold text-foreground mb-1">About</p>
-              <p className="text-xs leading-relaxed text-center">{exampleSpecies.description}</p>
-            </Card>
-          </div>
-        </DialogContent>
-      </Dialog>
+            </Link>
+            <div className="px-3 pb-3">
+              <button
+                type="button"
+                onClick={() => handleDelete(item.id)}
+                disabled={deletingId === item.id}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-500/30 text-red-400 py-2 text-xs font-medium disabled:opacity-50"
+              >
+                {deletingId === item.id ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3.5 w-3.5" />
+                )}
+                Delete observation
+              </button>
+            </div>
+          </motion.div>
+        ))}
+      </div>
     </div>
   );
 }

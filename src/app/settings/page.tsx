@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { useEnvidexStore } from "@/lib/store";
+import { clearEnvidexCachesOnLogout, useEnvidexStore } from "@/lib/store";
 import { ArrowLeft, LogOut, ChevronRight, User, Trash2, Info, FileText, Shield, MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
@@ -70,20 +70,34 @@ export default function SettingsPage() {
   const { avatarEmoji } = useEnvidexStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleSignOut = async () => {
+    clearEnvidexCachesOnLogout();
+    await signOut({ callbackUrl: "/login" });
+  };
 
   const handleDeleteAccount = async () => {
     if (!confirmDelete) {
       setConfirmDelete(true);
+      setDeleteError(null);
       setTimeout(() => setConfirmDelete(false), 3000);
       return;
     }
     setDeleting(true);
+    setDeleteError(null);
     try {
-      await fetch("/api/user", { method: "DELETE" });
+      const res = await fetch("/api/user", { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.error === "string" ? data.error : "Delete failed");
+      }
+      clearEnvidexCachesOnLogout();
       await signOut({ callbackUrl: "/login" });
-    } catch {
+    } catch (err) {
       setDeleting(false);
       setConfirmDelete(false);
+      setDeleteError(err instanceof Error ? err.message : "Delete failed");
     }
   };
 
@@ -180,25 +194,30 @@ export default function SettingsPage() {
             label="Sign out"
             left={<LogOut className="h-4 w-4" />}
             destructive
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => void handleSignOut()}
             right={null}
           />
         </Section>
 
         <motion.p variants={fadeUp} className="text-center text-[10px] text-muted-foreground/40 px-5">
-          Envidex — AI-powered species discovery
+          Photos you save are stored privately on the server. Local model scores are uncalibrated.
         </motion.p>
 
         <Section title="Danger zone">
           <Row
             label={deleting ? "Deleting…" : confirmDelete ? "Tap again to confirm" : "Delete account"}
-            sublabel="Permanently removes your account and data"
+            sublabel="Permanently removes your account and private observations"
             left={<Trash2 className="h-4 w-4" />}
             destructive
-            onClick={deleting ? undefined : handleDeleteAccount}
+            onClick={deleting ? undefined : () => void handleDeleteAccount()}
             right={null}
           />
         </Section>
+        {deleteError && (
+          <p className="px-5 text-sm text-red-400" role="alert">
+            Could not delete account: {deleteError}
+          </p>
+        )}
       </motion.div>
     </div>
   );

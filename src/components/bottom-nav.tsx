@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
 
 const navItems = [
   { href: "/", icon: Home, label: "Home" },
-  { href: "/live-feed", icon: Radio, label: "Live Feed" },
+  { href: "/live-feed", icon: Radio, label: "Identify" },
   { href: "/collection", icon: BookOpen, label: "Field Guide" },
   { href: "/profile", icon: User, label: "Profile" },
 ];

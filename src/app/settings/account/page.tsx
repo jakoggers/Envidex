@@ -1,11 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { ArrowLeft, Check, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
-import { useEnvidexStore } from "@/lib/store";
+import { clearEnvidexCachesOnLogout, useEnvidexStore } from "@/lib/store";
 
 const AVATAR_EMOJIS = [
   "🦁","🐯","🦊","🐺","🦝","🐻","🐼","🐨","🦘","🦙",
@@ -165,6 +165,12 @@ export default function AccountSettingsPage() {
       setNewPassword("");
       setConfirmPassword("");
       setPwSaved(true);
+      // Password change bumps tokenVersion — prior JWTs are revoked; re-auth required.
+      if (data.sessionRevoked) {
+        clearEnvidexCachesOnLogout();
+        await signOut({ callbackUrl: "/login" });
+        return;
+      }
       setTimeout(() => setPwSaved(false), 2000);
     } catch (err) {
       setPwError(err instanceof Error ? err.message : "Failed to update");
