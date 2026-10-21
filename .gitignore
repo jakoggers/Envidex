@@ -27,6 +27,10 @@ yarn-error.log*
 .env*.local
 .env
 
+# private local media store
+/data/private-media/
+/data/
+
 # vercel
 .vercel
 

@@ -30,7 +30,7 @@ export default function PrivacyPage() {
       </div>
 
       <div className="px-5 pb-12 max-w-prose">
-        <p className="text-xs text-muted-foreground mb-8">Last updated: April 25, 2026</p>
+        <p className="text-xs text-muted-foreground mb-8">Last updated: October 21, 2026</p>
 
         <Section title="Overview">
           <p>
@@ -41,39 +41,75 @@ export default function PrivacyPage() {
         </Section>
 
         <Section title="What we collect">
-          <p><span className="font-medium text-foreground">Account information</span> — When you create an account, we store your name, email address, and a hashed (encrypted) version of your password. If you sign in with Google or GitHub, we store your name, email, and profile image provided by that service.</p>
-          <p><span className="font-medium text-foreground">Photos you upload</span> — When you use the scan feature, your photo is sent to Anthropic&apos;s API for species identification. We do not store your photos on our servers. The image is transmitted, analysed, and discarded.</p>
-          <p><span className="font-medium text-foreground">Your collection</span> — Species you add to your field guide are stored locally on your device. They are not uploaded to our servers.</p>
-          <p><span className="font-medium text-foreground">Session data</span> — We use secure, server-side sessions to keep you signed in. Session tokens are stored in our database and expire automatically.</p>
+          <p>
+            <span className="font-medium text-foreground">Account information</span> — When you
+            create an account, we store your name, email address, and a hashed version of your
+            password. If you sign in with Google or GitHub, we store your name, email, and profile
+            image provided by that service.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Photos you choose to save</span> — By
+            default, identification uses a local Keras classifier. Images are validated, EXIF/GPS
+            stripped, and re-encoded before inference. When you tap Save private, the sanitized
+            image and observation metadata are stored in a private filesystem store and MongoDB,
+            accessible only through an authenticated media route. We do not upload new private
+            observations to public Blob storage in this product pass.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Optional external AI</span> — If you
+            explicitly opt in to Anthropic identify and{" "}
+            <span className="font-mono text-[11px]">ANTHROPIC_API_KEY</span> is configured, that
+            photo is sent to Anthropic for analysis. This is never a silent fallback for the local
+            model. If the key is missing, the feature reports unavailable.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Field guide</span> — Saved observations
+            are stored server-side under your account. UI preferences may be cached locally, keyed
+            to your user id and cleared on sign-out.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Session data</span> — We use JWT sessions
+            with a server-side token version so password changes and account deletion revoke prior
+            sessions.
+          </p>
         </Section>
 
         <Section title="How we use your data">
           <p>We use your information only to:</p>
           <ul className="list-disc list-inside space-y-1 pl-1">
             <li>Authenticate your account and keep you signed in</li>
-            <li>Display your name and profile within the app</li>
-            <li>Send your photos to Anthropic&apos;s API for species identification</li>
+            <li>Run local (or explicitly opted-in external) species identification</li>
+            <li>Store and display your private field guide</li>
           </ul>
-          <p>We do not sell your data, use it for advertising, or share it with any third party beyond what is described here.</p>
+          <p>
+            We do not sell your data, use it for advertising, or share it with any third party beyond
+            what is described here.
+          </p>
         </Section>
 
-        <Section title="Anthropic API">
+        <Section title="Inference disclosure">
           <p>
-            Species identification is powered by Anthropic&apos;s Claude AI. Photos you upload are
-            transmitted to Anthropic&apos;s servers for processing. Anthropic&apos;s own privacy
-            policy governs how they handle this data. We recommend reviewing it at{" "}
-            <span className="text-primary">anthropic.com/privacy</span>.
+            Local model scores are raw classifier outputs and are not calibrated probabilities.
+            Catalog facts come from curated records joined to model labels where names match;
+            unmatched labels remain unknown / Not Evaluated and are never invented.
           </p>
+        </Section>
+
+        <Section title="Deletion limits">
           <p>
-            We do not send any personally identifiable information alongside your photos.
+            Deleting an observation removes the private image and observation record when the
+            request succeeds. Account deletion removes your user record, observations, media, and
+            bumps session revocation. Legacy public share links created before this pass (if any)
+            are not expanded in this product version; remediation of historical public Blob objects
+            is tracked separately and is dry-run only.
           </p>
         </Section>
 
         <Section title="Data storage and security">
           <p>
-            Your account data is stored in MongoDB Atlas, hosted on secure cloud infrastructure.
-            Passwords are hashed using bcrypt and are never stored in plain text. We use
-            industry-standard TLS encryption for all data in transit.
+            Your account data is stored in MongoDB. Passwords are hashed using bcrypt. Private images
+            live on a non-public filesystem path served only through authenticated APIs. We use TLS
+            for data in transit in deployed environments.
           </p>
         </Section>
 
@@ -81,15 +117,15 @@ export default function PrivacyPage() {
           <p>You can at any time:</p>
           <ul className="list-disc list-inside space-y-1 pl-1">
             <li>Update your name and email in Settings → Change information</li>
-            <li>Delete your account in Settings, which permanently removes all your data from our servers</li>
-            <li>Clear your local collection in the app</li>
+            <li>Delete individual observations from the field guide</li>
+            <li>Delete your account in Settings (failures are shown; we do not pretend success)</li>
           </ul>
         </Section>
 
         <Section title="Cookies">
           <p>
-            We use a single session cookie to keep you signed in. We do not use tracking,
-            analytics, or advertising cookies.
+            We use a session cookie to keep you signed in. We do not use tracking, analytics, or
+            advertising cookies.
           </p>
         </Section>
 
@@ -97,13 +133,6 @@ export default function PrivacyPage() {
           <p>
             Envidex is not directed at children under 13. We do not knowingly collect personal
             information from children.
-          </p>
-        </Section>
-
-        <Section title="Changes to this policy">
-          <p>
-            If we make material changes to this policy, we will update the date at the top of this
-            page. Continued use of Envidex after changes constitutes acceptance of the updated policy.
           </p>
         </Section>
 

@@ -1,6 +1,6 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { getMongoClientPromise } from "@/lib/mongodb";
+import { bumpTokenVersion, requireAuthedUser } from "@/lib/session";
+import { deletePrivateObject } from "@/lib/media-store";
 import { ObjectId } from "mongodb";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -8,15 +8,13 @@ import { compare, hash } from "bcryptjs";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function GET(req: NextRequest) {
+  const authed = await requireAuthedUser(req);
+  if ("error" in authed) return authed.error;
 
   const client = await getMongoClientPromise();
   const db = client.db();
-  const user = await db.collection("users").findOne({ _id: new ObjectId(session.user.id) });
+  const user = await db.collection("users").findOne({ _id: new ObjectId(authed.user.id) });
 
   return NextResponse.json({ hasPassword: !!user?.passwordHash });
 }
@@ -41,10 +39,8 @@ const passwordSchema = z.object({
 const updateSchema = z.discriminatedUnion("type", [nameSchema, emailSchema, passwordSchema]);
 
 export async function PATCH(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authed = await requireAuthedUser(req);
+  if ("error" in authed) return authed.error;
 
   const body = await req.json();
   const parsed = updateSchema.safeParse(body);
@@ -54,7 +50,7 @@ export async function PATCH(req: NextRequest) {
 
   const client = await getMongoClientPromise();
   const db = client.db();
-  const userId = new ObjectId(session.user.id);
+  const userId = new ObjectId(authed.user.id);
   const user = await db.collection("users").findOne({ _id: userId });
 
   if (!user) {
@@ -102,24 +98,36 @@ export async function PATCH(req: NextRequest) {
       { _id: userId },
       { $set: { passwordHash: newHash, updatedAt: new Date() } }
     );
-    return NextResponse.json({ success: true });
+    await bumpTokenVersion(authed.user.id);
+    return NextResponse.json({ success: true, sessionRevoked: true });
   }
 }
 
-export async function DELETE() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function DELETE(req: NextRequest) {
+  const authed = await requireAuthedUser(req);
+  if ("error" in authed) return authed.error;
 
   const client = await getMongoClientPromise();
   const db = client.db();
-  const userId = new ObjectId(session.user.id);
+  const userId = new ObjectId(authed.user.id);
+  const ownerId = authed.user.id;
+
+  await bumpTokenVersion(ownerId);
+
+  const media = await db.collection("media").find({ ownerId }).toArray();
+  for (const m of media) {
+    if (typeof m.storageKey === "string") {
+      await deletePrivateObject(m.storageKey);
+    }
+  }
 
   await Promise.all([
     db.collection("users").deleteOne({ _id: userId }),
     db.collection("accounts").deleteMany({ userId }),
     db.collection("sessions").deleteMany({ userId }),
+    db.collection("observations").deleteMany({ ownerId }),
+    db.collection("inferenceResults").deleteMany({ ownerId }),
+    db.collection("media").deleteMany({ ownerId }),
   ]);
 
   return NextResponse.json({ success: true });

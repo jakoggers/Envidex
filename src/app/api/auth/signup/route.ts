@@ -2,6 +2,7 @@ import { hash } from "bcryptjs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getMongoClientPromise } from "@/lib/mongodb";
+import { rateLimit } from "@/lib/rate-limit";
 
 const signupSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -21,6 +22,12 @@ export async function POST(request: Request) {
     const name = parsed.data.name;
     const email = parsed.data.email;
     const emailLower = email.toLowerCase();
+
+    const rl = rateLimit(`auth:signup:${emailLower}`, 5, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
+
     const passwordHash = await hash(parsed.data.password, 12);
 
     const client = await getMongoClientPromise();
@@ -40,6 +47,8 @@ export async function POST(request: Request) {
       emailLower,
       passwordHash,
       authProviders: ["credentials"],
+      tokenVersion: 0,
+      role: "user",
       createdAt: new Date(),
       updatedAt: new Date(),
     });

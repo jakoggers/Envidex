@@ -63,7 +63,7 @@ export default async function SharePage({ params }: { params: Promise<{ shareId:
           Envidex
         </Link>
         <Link
-          href="/scan"
+          href="/live-feed"
           className="text-xs font-semibold bg-primary text-primary-foreground px-3 py-1.5 rounded-full"
         >
           Try it yourself

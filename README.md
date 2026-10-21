@@ -2,19 +2,16 @@ Link to demo: https://www.loom.com/share/d56b2c04a149444997668ce4c9e575a3
 
 # Envidex
 
-Envidex is a mobile-first AI-powered species identification app. Point your camera at any mammal, and Envidex identifies it, shows its conservation status, tells its story, and lets you build a personal field guide of everything you discover.
+Envidex is a mobile-first species identification app. Capture or upload a mammal photo, run the **local Keras classifier**, review an honest result card, and save a **private** observation to your server-backed field guide.
 
-## Features
+## Features (Phase A + B)
 
-- **Live feed** — real-time camera with frame capture and ML model predictions
-- **AI identification** — powered by the Anthropic API (Claude)
-- **Field guide** — personal collection of discovered species with badges and stats
-- **Daily & weekly challenges** — gamified discovery goals
-- **Species profiles** — conservation status, habitat, threats, fun facts
-- **Share discoveries** — generate shareable links via Vercel Blob
-- **Auth** — email/password signup + Google and GitHub OAuth
-- **Light & dark mode** — nature-inspired theme in both modes
-- **Support conservation** — WWF donation link built in
+- **Intentional identify** — Start camera / Upload (no auto-permission on mount)
+- **Local classifier default** — Python FastAPI `/predict` via `/api/predict`
+- **Explicit external AI opt-in** — Anthropic `/api/identify` only when configured and chosen
+- **Private field guide** — MongoDB observations + filesystem media behind auth
+- **Auth** — NextAuth JWT with `tokenVersion` revocation; email/password + optional OAuth
+- **Light & dark mode** — nature-inspired theme
 
 ## Tech Stack
 
@@ -23,35 +20,12 @@ Envidex is a mobile-first AI-powered species identification app. Point your came
 | Framework | Next.js 15 (App Router) |
 | Language | TypeScript |
 | UI | React 19, Tailwind CSS v4, shadcn/ui |
-| Animations | Framer Motion |
-| State | Zustand (with localStorage persistence) |
+| State | Zustand (UI/cache only, scoped by user) |
 | Auth | NextAuth.js v4 + MongoDB adapter |
-| Database | MongoDB Atlas |
-| AI | Anthropic API via Vercel AI SDK |
-| Storage | Vercel Blob |
-| ML backend | Python service (port 8000, proxied via `/api/predict`) |
-| Deployment | Vercel |
-
-## Open Source Libraries
-
-| Library | Purpose |
-|---|---|
-| [Next.js](https://nextjs.org) | React framework with App Router and Turbopack |
-| [React](https://react.dev) | UI layer |
-| [Tailwind CSS](https://tailwindcss.com) | Utility-first styling |
-| [shadcn/ui](https://ui.shadcn.com) | Accessible component primitives |
-| [Radix UI](https://radix-ui.com) | Headless UI primitives (Avatar, Dialog, Tabs, etc.) |
-| [Framer Motion](https://www.framer.com/motion) | Animations and transitions |
-| [Zustand](https://zustand-demo.pmnd.rs) | Lightweight state management |
-| [NextAuth.js](https://next-auth.js.org) | Authentication |
-| [Vercel AI SDK](https://sdk.vercel.ai) | Anthropic API integration |
-| [lucide-react](https://lucide.dev) | Icon library |
-| [canvas-confetti](https://github.com/catdad/canvas-confetti) | Confetti on species collection |
-| [bcryptjs](https://github.com/dcodeIO/bcrypt.js) | Password hashing |
-| [nanoid](https://github.com/ai/nanoid) | Share ID generation |
-| [clsx](https://github.com/lukeed/clsx) + [tailwind-merge](https://github.com/dcastil/tailwind-merge) | Conditional class utilities |
-| [zod](https://zod.dev) | Schema validation |
-| [tw-animate-css](https://github.com/jamiebuilds/tailwindcss-animate) | CSS animation utilities |
+| Database | MongoDB |
+| ML backend | Single FastAPI app: `src/backend/main.py` |
+| Private images | Local filesystem + `/api/media/[id]` |
+| Deployment | Vercel (app); Python service separately |
 
 ## Getting Started
 
@@ -61,36 +35,36 @@ Envidex is a mobile-first AI-powered species identification app. Point your came
 npm install
 ```
 
-### 2. Configure environment variables
-
-Copy `.env.example` to `.env.local`:
+### 2. Configure environment
 
 ```bash
 cp .env.example .env.local
 ```
 
-Set the following values:
+Required for the Next.js app:
 
+- `MONGODB_URI_REAL`
+- `NEXTAUTH_URL` (e.g. `http://localhost:3000`)
+- `NEXTAUTH_SECRET` (`openssl rand -base64 32`)
+
+Optional: OAuth, `ANTHROPIC_API_KEY` (external AI opt-in), `PREDICTION_API_BASE_URL`, `STORAGE_ROOT`, size limits.
+
+See [`.env.example`](.env.example) for the full list. Python may use `MONGO_URI` only for optional Gemini animal-info logging — it is **not** required to start `/predict`.
+
+### 3. Start the local prediction service
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r src/backend/requirements.txt
+cd src/backend && uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
-MONGODB_URI_REAL=        # MongoDB Atlas or self-hosted connection string
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=         # Long random secret (use: openssl rand -base64 32)
-ANTHROPIC_API_KEY=       # From console.anthropic.com
-BLOB_READ_WRITE_TOKEN=   # From Vercel dashboard (Storage → Blob)
 
-# Optional — OAuth providers
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-```
+`GEMINI_API_KEY` is **not** required for `/predict`. Optional `/api/animal-info` stays behind key presence.
 
-### 3. OAuth callback URLs (if using OAuth)
+Do **not** start `AnimalAiImageRec/Prediction.py` — that second server is retired.
 
-- Google: `http://localhost:3000/api/auth/callback/google`
-- GitHub: `http://localhost:3000/api/auth/callback/github`
-
-### 4. Run the development server
+### 4. Run the Next.js app
 
 ```bash
 npm run dev
@@ -98,27 +72,43 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## API Routes
+### 5. Checks
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
+npm test
+```
+
+## API Routes (product path)
 
 | Route | Method | Description |
 |---|---|---|
 | `/api/auth/signup` | POST | Email/password registration |
 | `/api/auth/[...nextauth]` | ANY | NextAuth session handling |
-| `/api/identify` | POST | AI species identification (Anthropic) |
-| `/api/predict` | POST | ML model prediction (proxies to Python backend) |
-| `/api/scans` | POST | Save scan to Vercel Blob for sharing |
-| `/api/user` | GET/PATCH | User profile operations |
+| `/api/predict` | POST | Auth + sanitize → local Keras predict → stores inference result |
+| `/api/identify` | POST | Explicit Anthropic identify (503 if unset) |
+| `/api/observations` | GET/POST | List / save private observation by `inferenceResultId` |
+| `/api/observations/[id]` | GET/DELETE | Detail / delete (owner only) |
+| `/api/media/[id]` | GET | Authenticated private image bytes |
+| `/api/user` | GET/PATCH/DELETE | Profile; password change bumps `tokenVersion` |
 
 ## Pages
 
 | Route | Description |
 |---|---|
-| `/` | Home — challenges, recent discoveries, donation |
-| `/live-feed` | Live camera feed with ML predictions |
-| `/collection` | Personal field guide |
-| `/species/[id]` | Species detail page |
-| `/share/[shareId]` | Public shared discovery |
-| `/profile` | Badges, stats, streaks |
-| `/login` `/signup` | Authentication |
-| `/settings` `/settings/account` | Account settings |
-| `/privacy` `/terms` | Legal pages |
+| `/` | Home |
+| `/live-feed` | Identify (camera / upload → result → save) |
+| `/collection` | Server-backed private field guide |
+| `/collection/[id]` | Observation detail |
+| `/share/[shareId]` | Legacy public share (read-only; CTA → `/live-feed`) |
+| `/settings` | Account settings + honest delete failures |
+
+## Security notes (this pass)
+
+- Observations and images are private by default; no new public Blob uploads.
+- JWT `tokenVersion` rejects sessions after password change / account delete.
+- OAuth does not merge accounts on unverified email match.
+- Image uploads: JPEG/PNG/WebP, magic-byte + decode, max bytes/pixels, EXIF strip, re-encode.
+- In-memory rate limits are single-instance only (document Redis for multi-instance later).
