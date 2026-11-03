@@ -1,124 +1,110 @@
-Link to demo: https://www.loom.com/share/d56b2c04a149444997668ce4c9e575a3
+# Secondhand Scout
 
-# Envidex
+Search secondhand marketplaces from one interface. Enter an item (for example `Sony WH-1000XM4`), optionally set budget, location, condition, and keyword filters, then review normalized listings with links to the originals.
 
-Envidex is a mobile-first AI-powered species identification app. Point your camera at any mammal, and Envidex identifies it, shows its conservation status, tells its story, and lets you build a personal field guide of everything you discover.
+**Stack:** Next.js 15 (App Router), TypeScript, Tailwind CSS v4, Zod, Node.js server routes.
 
-## Features
-
-- **Live feed** — real-time camera with frame capture and ML model predictions
-- **AI identification** — powered by the Anthropic API (Claude)
-- **Field guide** — personal collection of discovered species with badges and stats
-- **Daily & weekly challenges** — gamified discovery goals
-- **Species profiles** — conservation status, habitat, threats, fun facts
-- **Share discoveries** — generate shareable links via Vercel Blob
-- **Auth** — email/password signup + Google and GitHub OAuth
-- **Light & dark mode** — nature-inspired theme in both modes
-- **Support conservation** — WWF donation link built in
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 15 (App Router) |
-| Language | TypeScript |
-| UI | React 19, Tailwind CSS v4, shadcn/ui |
-| Animations | Framer Motion |
-| State | Zustand (with localStorage persistence) |
-| Auth | NextAuth.js v4 + MongoDB adapter |
-| Database | MongoDB Atlas |
-| AI | Anthropic API via Vercel AI SDK |
-| Storage | Vercel Blob |
-| ML backend | Python service (port 8000, proxied via `/api/predict`) |
-| Deployment | Vercel |
-
-## Open Source Libraries
-
-| Library | Purpose |
-|---|---|
-| [Next.js](https://nextjs.org) | React framework with App Router and Turbopack |
-| [React](https://react.dev) | UI layer |
-| [Tailwind CSS](https://tailwindcss.com) | Utility-first styling |
-| [shadcn/ui](https://ui.shadcn.com) | Accessible component primitives |
-| [Radix UI](https://radix-ui.com) | Headless UI primitives (Avatar, Dialog, Tabs, etc.) |
-| [Framer Motion](https://www.framer.com/motion) | Animations and transitions |
-| [Zustand](https://zustand-demo.pmnd.rs) | Lightweight state management |
-| [NextAuth.js](https://next-auth.js.org) | Authentication |
-| [Vercel AI SDK](https://sdk.vercel.ai) | Anthropic API integration |
-| [lucide-react](https://lucide.dev) | Icon library |
-| [canvas-confetti](https://github.com/catdad/canvas-confetti) | Confetti on species collection |
-| [bcryptjs](https://github.com/dcodeIO/bcrypt.js) | Password hashing |
-| [nanoid](https://github.com/ai/nanoid) | Share ID generation |
-| [clsx](https://github.com/lukeed/clsx) + [tailwind-merge](https://github.com/dcastil/tailwind-merge) | Conditional class utilities |
-| [zod](https://zod.dev) | Schema validation |
-| [tw-animate-css](https://github.com/jamiebuilds/tailwindcss-animate) | CSS animation utilities |
-
-## Getting Started
-
-### 1. Install dependencies
+## Quick start
 
 ```bash
 npm install
-```
-
-### 2. Configure environment variables
-
-Copy `.env.example` to `.env.local`:
-
-```bash
 cp .env.example .env.local
-```
-
-Set the following values:
-
-```
-MONGODB_URI_REAL=        # MongoDB Atlas or self-hosted connection string
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=         # Long random secret (use: openssl rand -base64 32)
-ANTHROPIC_API_KEY=       # From console.anthropic.com
-BLOB_READ_WRITE_TOKEN=   # From Vercel dashboard (Storage → Blob)
-
-# Optional — OAuth providers
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-```
-
-### 3. OAuth callback URLs (if using OAuth)
-
-- Google: `http://localhost:3000/api/auth/callback/google`
-- GitHub: `http://localhost:3000/api/auth/callback/github`
-
-### 4. Run the development server
-
-```bash
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## API Routes
+### Useful commands
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Local development server (Turbopack) |
+| `npm run build` | Production build |
+| `npm start` | Run production server |
+| `npm test` | Focused unit tests |
+| `npm run typecheck` | TypeScript check |
+
+## Environment
+
+Copy `.env.example` to `.env.local` and fill in values as needed:
+
+```bash
+cp .env.example .env.local
+```
+
+| Variable | Required | Description |
+|---|---|---|
+| `EBAY_CLIENT_ID` | For live eBay | eBay developer application client id |
+| `EBAY_CLIENT_SECRET` | For live eBay | eBay developer application client secret |
+| `EBAY_ENV` | No | `sandbox` or `production` (default `production`) |
+| `EBAY_MARKETPLACE_ID` | No | Browse API marketplace header (default `EBAY_US`) |
+| `PROVIDER_TIMEOUT_MS` | No | Per-provider timeout (default `12000`) |
+
+Without eBay credentials the eBay source returns `not_configured` with an “Open search on eBay” fallback link. Facebook Marketplace and OfferUp always return `unavailable` with fallback links (see below).
+
+**Demo mode** is an explicit UI/API flag (`demoMode=1`). It returns labeled fixture listings and is never used as a silent substitute for failed live requests.
+
+## Source capabilities
+
+### eBay (live — official Browse API)
+
+| | |
+|---|---|
+| Integration | Official [Buy Browse API](https://developer.ebay.com/api-docs/buy/browse/overview.html) `item_summary/search` |
+| Auth | OAuth **client credentials** application token (`https://api.ebay.com/oauth/api_scope`), cached server-side until ~2 minutes before expiry |
+| Environments | `EBAY_ENV=sandbox` → `api.sandbox.ebay.com`; `production` → `api.ebay.com` |
+| Applied filters | Keywords (`q`), price range + currency, condition (`USED` or refurbished `conditionIds`), sort (`price` / `newlyListed` / Best Match) |
+| Partial support | US ZIP via `buyerPostalCode` / end-user context for shipping estimates — **seller distance radius is not applied** by this Browse search integration |
+| Listing types | Fixed-price vs auction distinguished via `buyingOptions`; auction current bids are **not** treated as purchase totals |
+| Pagination | `limit`/`offset` cursors (page size 50) |
+| Caching | ~60s in-memory response cache |
+| Rate limits | Application quotas vary; HTTP 429 honored with bounded backoff. See eBay Developer Analytics for your app’s limits |
+| Setup errors | Missing credentials → `not_configured`. 401/403 → actionable message about keys, scope, or production Browse API approval |
+
+**Access requirements:** eBay developer account, application keys, Browse API enabled. Production Browse API access may require additional eBay approval beyond creating keys.
+
+### Facebook Marketplace (unavailable — honest fallback)
+
+| | |
+|---|---|
+| Public consumer search API | **None** |
+| Related Meta APIs | Meta Content Library Marketplace endpoints are **research-only** (approved organizations). Marketplace Partnerships APIs distribute seller inventory — they do not search buyer listings |
+| Scraping | Not implemented. Login walls / CAPTCHA are not bypassed |
+| Status | `unavailable` |
+| Fallback | Verified URL: `https://www.facebook.com/marketplace/search/?query=...` (keywords only). Location, distance, and price must be set in Facebook’s UI — those filters are **not** documented as stable public query parameters |
+
+### OfferUp (unavailable — honest fallback)
+
+| | |
+|---|---|
+| Public developer API | **None** |
+| Third-party scrapers | Not used (not an approved OfferUp integration) |
+| Status | `unavailable` |
+| Fallback | Verified public URL shape: `https://offerup.com/search?q=...` with optional `radius`, `PRICE_MIN`, `PRICE_MAX`, `CONDITION`, `SORT`. ZIP/location is typically session/geo-based on OfferUp and is **not** invented as a query parameter |
+
+Fallback links are navigation aids, **not** retrieved listings. Integrations are only labeled complete when they actually retrieve data (eBay when configured).
+
+## Application behavior
+
+- **URL state:** Search filters sync into the query string so searches are bookmarkable (`q`, `minPrice`, `maxPrice`, `currency`, `location`, `radiusMiles`, `condition`, `marketplaces`, `requiredTerms`, `excludedTerms`, `sort`, `demoMode`).
+- **Normalization:** One listing model with nulls preserved. Unknown shipping ≠ free. Retrieval time ≠ publication time. Auction bids ≠ buy prices. Known total only when price + shipping are both known in the same currency.
+- **Deduplication:** Exact matches by `marketplace + sourceListingId` or canonical URL — not by similar titles.
+- **Relevance:** Explainable score from exact phrases, model tokens, required/excluded terms, and accessory demotion.
+- **Sort scope:** Sorting applies to **fetched results only** and is labeled in the UI. Lowest-total sort separates known totals, unknown shipping, and auctions. Currencies are not converted.
+- **Reliability:** Providers run concurrently with bounded concurrency and per-provider timeouts. One failure returns partial results. Per-source statuses: `success`, `not_configured`, `unavailable`, `rate_limited`, `timeout`, `error`, `skipped`.
+- **Security:** Credentials stay server-side and out of logs. Manual bookmark saves validate allowlisted hosts and **do not fetch** remote pages (no SSRF). Listing text is sanitized for display.
+- **Manual bookmarks:** `/bookmarks` — enter URL, title, and price. Stored in browser `localStorage` after server-side validation.
+
+## API routes
 
 | Route | Method | Description |
 |---|---|---|
-| `/api/auth/signup` | POST | Email/password registration |
-| `/api/auth/[...nextauth]` | ANY | NextAuth session handling |
-| `/api/identify` | POST | AI species identification (Anthropic) |
-| `/api/predict` | POST | ML model prediction (proxies to Python backend) |
-| `/api/scans` | POST | Save scan to Vercel Blob for sharing |
-| `/api/user` | GET/PATCH | User profile operations |
+| `/api/search` | GET/POST | Run multi-provider search |
+| `/api/bookmarks` | POST | Validate/normalize a manual bookmark (no remote fetch) |
+| `/api/providers` | GET | Provider capability + configuration status |
 
-## Pages
+## Verification notes
 
-| Route | Description |
-|---|---|
-| `/` | Home — challenges, recent discoveries, donation |
-| `/live-feed` | Live camera feed with ML predictions |
-| `/collection` | Personal field guide |
-| `/species/[id]` | Species detail page |
-| `/share/[shareId]` | Public shared discovery |
-| `/profile` | Badges, stats, streaks |
-| `/login` `/signup` | Authentication |
-| `/settings` `/settings/account` | Account settings |
-| `/privacy` `/terms` | Legal pages |
+- **Unit tests** (`npm test`) cover normalization, unknown shipping, auctions, filtering, deduplication, relevance demotion, sort bucketing, partial provider failure, and fallback URL shapes.
+- **Live eBay verification** requires valid `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` with Browse API access. Without credentials, live eBay retrieval remains **unverified** in this environment; the adapter still returns structured `not_configured` / auth errors and fallback links.
+- Facebook Marketplace and OfferUp live retrieval are **intentionally unavailable** and verified as such (status + fallback only).
