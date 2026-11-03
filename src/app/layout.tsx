@@ -1,28 +1,41 @@
 import type { Metadata, Viewport } from "next";
-import { Fira_Code, Geist_Mono, Fraunces, Finger_Paint, DM_Sans, Space_Grotesk } from "next/font/google";
+import Link from "next/link";
+import {
+  DM_Sans,
+  Fraunces,
+  Geist_Mono,
+  Space_Grotesk,
+} from "next/font/google";
 import "./globals.css";
-import { AppProviders } from "@/components/app-providers";
-import { BottomNav } from "@/components/bottom-nav";
-import { PageTransition } from "@/components/page-transition";
 
-const firaCode = Fira_Code({ subsets: ["latin"], variable: "--font-geist-sans", weight: ["300", "400", "500", "600", "700"] });
-const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
-const fraunces = Fraunces({ subsets: ["latin"], variable: "--font-fraunces", axes: ["SOFT", "WONK"] });
-const fingerPaint = Finger_Paint({ subsets: ["latin"], variable: "--font-finger-paint", weight: "400" });
-const dmSans = DM_Sans({ subsets: ["latin"], variable: "--font-dm-sans" });
-const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-space-grotesk" });
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
+});
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  axes: ["SOFT", "WONK"],
+});
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space-grotesk",
+});
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
+  variable: "--font-geist-mono",
+});
 
 export const metadata: Metadata = {
-  title: "Envidex — Species Discovery",
-  description: "Identify, collect, and learn about Earth's endangered species",
-  manifest: "/manifest.json",
+  title: "Secondhand Scout",
+  description:
+    "Search eBay, Facebook Marketplace, and OfferUp from one honest interface.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f1f14",
+  themeColor: "#1f5c4a",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
 };
 
 export default function RootLayout({
@@ -31,23 +44,40 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${firaCode.variable} ${geistMono.variable} ${fraunces.variable} ${fingerPaint.variable} ${dmSans.variable} ${spaceGrotesk.variable}`} suppressHydrationWarning>
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `try{var t=localStorage.getItem('theme')||'dark';var d=document.documentElement;d.classList.remove('light','dark');d.classList.add(t==='light'?'light':'dark');}catch(e){}`,
-          }}
-        />
-      </head>
-      <body className="antialiased min-h-screen bg-background text-foreground">
-        <AppProviders>
-          <div className="flex flex-col min-h-screen max-w-md mx-auto relative">
-            <main className="flex-1 pb-20">
-              <PageTransition>{children}</PageTransition>
-            </main>
-            <BottomNav />
-          </div>
-        </AppProviders>
+    <html
+      lang="en"
+      className={`${dmSans.variable} ${fraunces.variable} ${spaceGrotesk.variable} ${geistMono.variable}`}
+    >
+      <body className="font-sans antialiased">
+        <div className="relative mx-auto min-h-screen w-full max-w-6xl px-4 pb-16 pt-6 sm:px-6 lg:px-8">
+          <header className="mb-8 flex items-center justify-between gap-4">
+            <Link href="/" className="group flex items-baseline gap-2">
+              <span className="font-[family-name:var(--font-fraunces)] text-2xl font-semibold tracking-tight text-primary sm:text-3xl">
+                Secondhand Scout
+              </span>
+              <span className="hidden text-xs uppercase tracking-[0.18em] text-muted-foreground sm:inline">
+                cross-market search
+              </span>
+            </Link>
+            <nav className="flex items-center gap-3 text-sm">
+              <Link
+                href="/bookmarks"
+                className="text-muted-foreground transition hover:text-foreground"
+              >
+                Bookmarks
+              </Link>
+              <a
+                href="https://github.com/jakoggers/Envidex"
+                className="text-muted-foreground transition hover:text-foreground"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Source
+              </a>
+            </nav>
+          </header>
+          {children}
+        </div>
       </body>
     </html>
   );
